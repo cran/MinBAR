@@ -1,0 +1,10 @@
+0926082aa15a168d4a4952b0b0998000 *DESCRIPTION
+f6a2a1ff01e4fb53f7a4256e5f564ea5 *NAMESPACE
+1e336b0c6ae37fae1012a248958639e7 *R/data.R
+5504b9486f0bb9b9595673063939488f *R/minba.R
+3baa8a72415f278d116144a29b7d7b1a *README.md
+61cd6ddc83e6867918ce5d91cb6af59c *data/bios.RData
+d2a750f69b40bdcc586d58802c04443b *data/sprecords.RData
+a4f48160e6c39e492fa0c8ae5f14ab8a *man/bioscrop.Rd
+41a0e3ee003d1d03c62f33aa86aa30d4 *man/minba-open-paren-close-paren.Rd
+4cb6b62e3a578e94605250a57c6f486f *man/sprecords.Rd
