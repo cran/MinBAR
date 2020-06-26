@@ -14,25 +14,27 @@
 #' @importFrom graphics plot
 #' @importFrom stats quantile sd
 #' @importFrom utils read.csv write.csv
-#' @param occ Data set with presences (occurrences). A data frame with 3 columns: long, lat and species name (in this order)
-#' @param varbles A raster brick of the independent variables, or a directory where the rasters are. It will use all the rasters in the folder. Supported: .tif and .bil
-#' @param wd A directory to save the results
-#' @param prj Coordinates system (e.g. "4326" is WGS84; check \url{http://spatialreference.org/} )
-#' @param num_bands Number of buffers
-#' @param n_rep Number of replicates
-#' @param maxent_tool Either "dismo" or "maxnet"
-#' @param BI_part Maximum Boyce Index Partial to stop the process if reached
-#' @param BI_tot Maximum Boyce Index Total to stop the process if reached
-#' @param SD_BI_part Minimum SD of the Boyce Index Partial to stop the process if reached (last 3 buffers)
-#' @param SD_BI_tot Minimum SD of the Boyce Index Total to stop the process if reached (last 3 buffers)
+#' @param occ Data frame or character. Data set with presences (occurrences). A data frame with 3 columns: long, lat and species name (in this order)
+#' @param varbles Raster* object. A raster brick of the independent variables, or a directory where the rasters are. It will use all the rasters in the folder. Supported: .tif and .bil
+#' @param wd Character. A directory to save the results
+#' @param prj Numeric. Coordinates system (e.g. "4326" is WGS84; check \url{http://spatialreference.org/} )
+#' @param num_bands Numeric. Number of buffers (default is 10)
+#' @param n_rep Numeric. Number of replicates (default is 3)
+#' @param occ_prop_test Numeric. Proportion of presences (occurrences) set aside for testing (default is 0.3)
+#' @param maxent_tool Character. Either "dismo" or (default) "maxnet"
+#' @param BI_part Numeric. Maximum Boyce Index Partial to stop the process if reached
+#' @param BI_tot Numeric. Maximum Boyce Index Total to stop the process if reached
+#' @param SD_BI_part Numeric. Minimum SD of the Boyce Index Partial to stop the process if reached (last 3 buffers)
+#' @param SD_BI_tot Numeric. Minimum SD of the Boyce Index Total to stop the process if reached (last 3 buffers)
 #' @return \code{selfinfo_mod_}, \code{info_mod_} and \code{info_mod_means_} (all followed by the name of the species). The first two tables are merely informative about how the modelling process has been developed and the results of each model. Whereas \code{info_mod_means_} shows the means of the n models run for each buffer
 #' @name minba()
 #' @references Rotllan-Puig, X. & Traveset, A. 2019. Determining the Minimal Background Area for Species Distribution Models: MinBAR Package. bioRxiv. 571182. DOI: 10.1101/571182
+#' @export
 #' @examples
 #' \dontrun{
-#' MinBAR:::minba(occ = sprecords, varbles = bioscrop,
-#' wd = tempdir(), prj = 4326, num_bands = 3, n_rep = 3,
-#' maxent_tool = "maxnet")
+#' minba(occ = sprecords, varbles = bioscrop,
+#'       wd = tempdir(), prj = 4326, num_bands = 3, n_rep = 3,
+#'       maxent_tool = "maxnet")
 #' }
 #'
 # Created on: Summer 2018 - Winter 2019
@@ -42,6 +44,7 @@ minba <- function(occ = NULL, varbles = NULL,
                   wd = NULL,
                   prj = NULL,
                   num_bands = 10, n_rep = 3,
+                  occ_prop_test = 0.3,
                   maxent_tool = "maxnet",
                   BI_part = NULL, BI_tot = NULL,
                   SD_BI_part = NULL, SD_BI_tot = NULL){
@@ -49,6 +52,9 @@ minba <- function(occ = NULL, varbles = NULL,
   if(is.null(wd)) stop("Please, indicate a directory (wd) to save results")
   dir2save <- paste0(wd, "/minba_", format(Sys.Date(), format="%Y%m%d"))
   if(!file.exists(dir2save)) dir.create(dir2save)
+  graphics.off()
+  if(occ_prop_test <= 0 | occ_prop_test >= 1) stop("Please, specify a proportion of occurences to set aside for testing the models (default: 0.3)")
+
 
   #### Retrieving Presence Records ####
   if(is.vector(occ)){
@@ -120,10 +126,14 @@ minba <- function(occ = NULL, varbles = NULL,
     ext1[1, 2] <- pres@bbox[1, 2] + incr1[1]
     ext1[2, 1] <- pres@bbox[2, 1] - incr1[2]
     ext1[2, 2] <- pres@bbox[2, 2] + incr1[2]
-    varbles1 <<- raster::stack(raster::crop(vrbles, ext1))
+    if(all(ext1[, 1] > as.vector(vrbles@extent)[c(1, 3)]) & all(ext1[, 2] < as.vector(vrbles@extent)[c(2, 4)])){
+      varbles1 <<- raster::stack(raster::crop(vrbles, ext1))
+    }else{
+      varbles1 <<- raster::stack(raster::crop(vrbles, pres@bbox))
+    }
 
     # number of background points (see Guevara et al, 2017)
-    num_bckgr1 <- (varbles1@ncols * varbles1@nrows) * 50/100
+    num_bckgr1 <- floor((varbles1@ncols * varbles1@nrows) * 50/100)
     # background points
     bckgr_pts1 <- dismo::randomPoints(varbles1[[1]], num_bckgr1, pres)
 
@@ -146,17 +156,21 @@ minba <- function(occ = NULL, varbles = NULL,
       ext[1, 2] <- pres4model@bbox[1, 2] + incr[1]
       ext[2, 1] <- pres4model@bbox[2, 1] - incr[2]
       ext[2, 2] <- pres4model@bbox[2, 2] + incr[2]
-      varbles2 <- raster::stack(raster::crop(vrbles, ext))
+      if(all(ext[, 1] > as.vector(vrbles@extent)[c(1, 3)]) & all(ext[, 2] < as.vector(vrbles@extent)[c(2, 4)])){
+        varbles2 <- raster::stack(raster::crop(vrbles, ext))
+      }else{
+        varbles2 <- raster::stack(raster::crop(vrbles, pres4model@bbox))
+      }
 
       # number of background points (see Guevara et al, 2017)
-      num_bckgr <- (varbles2@ncols * varbles2@nrows) * 50/100
+      num_bckgr <- floor((varbles2@ncols * varbles2@nrows) * 50/100)
       #if(num_bckgr<100) {
       #  pres4model1 <- sample(1:nrow(pres4model), nrow(pres4model)*0.1)
       #  pres4model <- pres4model[pres4model1,]
       #}
 
       # sampling presences for calibrating and testing (70-30%) within the buffer
-      folds <- sample(1:nrow(pres4model), nrow(pres4model)*0.7)
+      folds <- sample(1:nrow(pres4model), nrow(pres4model)*(1-occ_prop_test))
       samp <- as.numeric(unlist(folds))
       pres4cali <- pres4model[samp, 1]
       pres4test <- pres4model[-samp, 1]
@@ -168,7 +182,7 @@ minba <- function(occ = NULL, varbles = NULL,
 
       # sampling presences for testing on the whole extent (30% of total presences except those for calibrating)
       pres1 <- pres[-samp, 1]
-      folds1 <- sample(1:nrow(pres1), nrow(pres1)*0.3)
+      folds1 <- sample(1:nrow(pres1), nrow(pres1)*(occ_prop_test))
       samp1 <- as.numeric(unlist(folds1))
       pres4test_tot <- pres1[-samp1, 1]
 
@@ -223,12 +237,15 @@ minba <- function(occ = NULL, varbles = NULL,
         }else if(maxent_tool == "maxnet"){
           pres4test$tovalidate <- 1
           varbles2test <- raster::rasterize(pres4test, varbles2[[1]], pres4test$tovalidate)
-          varbles2predict <- as.data.frame(matrix(nrow = length(varbles2[[1]]@data@values), ncol = dim(varbles2)[3]))
+          #varbles2predict <- as.data.frame(matrix(nrow = length(varbles2[[1]]@data@values), ncol = dim(varbles2)[3]))
+          varbles2predict <- as.data.frame(matrix(nrow = length(raster::getValues(varbles2[[1]])), ncol = dim(varbles2)[3]))
           names(varbles2predict) <- colnames(data_train)
           for(i in 1:dim(varbles2)[3]){
-            varbles2predict[, i] <- varbles2[[i]]@data@values
+            #varbles2predict[, i] <- varbles2[[i]]@data@values
+            varbles2predict[, i] <- raster::getValues(varbles2[[i]])
           }
-          varbles2predict$tovalidate <- varbles2test@data@values
+          #varbles2predict$tovalidate <- varbles2test@data@values
+          varbles2predict$tovalidate <- raster::getValues(varbles2test)
           varbles2predict$tovalidate[is.na(varbles2predict$tovalidate)] <- 0
           varbles2predict <- varbles2predict[stats::complete.cases(varbles2predict), ]
           varbles2predict$preds_maxnet <- predict(modl,
@@ -242,6 +259,7 @@ minba <- function(occ = NULL, varbles = NULL,
         save(evs, file = paste0(path, "/evaluations.RData"))
         #rm(varbles2)
         #gc()
+        graphics.off()
 
         #Computing Boyce Index (on the same extent with 30% to test)
         if(maxent_tool == "dismo"){
@@ -268,12 +286,15 @@ minba <- function(occ = NULL, varbles = NULL,
           pres4test_tot$tovalidate <- 1
           varbles1 <- varbles1
           varbles2test <- raster::rasterize(pres4test_tot, varbles1[[1]], pres4test_tot$tovalidate)
-          varbles2predict <- as.data.frame(matrix(nrow = length(varbles1[[1]]@data@values), ncol = dim(varbles1)[3]))
+          #varbles2predict <- as.data.frame(matrix(nrow = length(varbles1[[1]]@data@values), ncol = dim(varbles1)[3]))
+          varbles2predict <- as.data.frame(matrix(nrow = length(raster::getValues(varbles1[[1]])), ncol = dim(varbles1)[3]))
           names(varbles2predict) <- colnames(data_train)
           for(i in 1:dim(varbles1)[3]){
-            varbles2predict[, i] <- varbles1[[i]]@data@values
+            #varbles2predict[, i] <- varbles1[[i]]@data@values
+            varbles2predict[, i] <- raster::getValues(varbles1[[i]])
           }
-          varbles2predict$tovalidate <- varbles2test@data@values
+          #varbles2predict$tovalidate <- varbles2test@data@values
+          varbles2predict$tovalidate <- raster::getValues(varbles2test)
           varbles2predict$tovalidate[is.na(varbles2predict$tovalidate)] <- 0
           varbles2predict <- varbles2predict[stats::complete.cases(varbles2predict), ]
           varbles2predict$preds_maxnet <- predict(modl,
@@ -378,10 +399,11 @@ minba <- function(occ = NULL, varbles = NULL,
     #graphics.off()
     dt2exp_mean[,names(dt2exp_mean) %in% c("BoyceIndex_part", "BoyceIndex_tot")] <- round(dt2exp_mean[,names(dt2exp_mean) %in% c("BoyceIndex_part", "BoyceIndex_tot")], 3)
     pdf(paste0(dir2save, "/results_", sps, "/boyce_buffer_", sps, "_part_tot.pdf"))
-    if(nrow(dt2exp_mean) < 5){ tp <- c("p") }else{ tp <- c("p", "smooth") }
+    #if(nrow(dt2exp_mean) < 5){ tp <- c("p") }else{ tp <- c("p", "smooth") }
+    if(nrow(dt2exp_mean) < 5){ tp <- c("p") }else{ tp <- c("p", "l") }
     plt <- lattice::xyplot(BoyceIndex_part ~ Buffer, dt2exp_mean,
                            type = tp,
-                           span = 0.8,
+                           #span = 0.8,
                            ylim = c(0.45, 1.05),
                            col = "blue",
                            main = bquote(Boyce~Index~(mean~of~.(n_rep)~models)~-~italic(.(specs_long))),
@@ -391,13 +413,13 @@ minba <- function(occ = NULL, varbles = NULL,
                            lines = list(col=c("blue", "green", "magenta")),
                            text = list(c("Boyce Index Partial","Boyce Index Total", "Execution Time"))))
     plt1 <- lattice::xyplot(ExecutionTime ~ Buffer, dt2exp_mean,
-                            type = c("p", "r"),
+                            type = c("p", "l"),
                             ylab = "Execution Time (min)",
                             col = "magenta")
     dbl_plt <- latticeExtra::doubleYScale(plt, plt1, add.ylab2 = TRUE)
     plt2 <- lattice::xyplot(BoyceIndex_tot ~ Buffer, dt2exp_mean,
                             type = tp,
-                            span = 0.8,
+                            #span = 0.8,
                             col = "green")
     plot(dbl_plt + latticeExtra::as.layer(plt2))
     dev.off()
