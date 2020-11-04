@@ -7,7 +7,7 @@
 #'
 #' @author Xavier Rotllan-Puig & Anna Traveset
 #' @title Determining the Minimal Background Area for Species Distribution Models
-#' @description A versatile tool that aims at (1) defining what is the minimum or optimal background extent necessary to fit good partial species distribution models and/or (2) determining if the background area used to fit a partial species distribution model is reliable enough to extract ecologically relevant conclusions from it. See Rotllan-Puig, X. & Traveset, A. (2019)
+#' @description A versatile tool that aims at aims at (1) defining the minimum background extent necessary to fit SDMs reliable enough to extract ecologically relevant conclusions from them and (2) optimizing the modelling process in terms of computation demands. See Rotllan-Puig, X. & Traveset, A. (2021)
 #' @details Please check the article 'Determining the Minimal Background Area for Species Distribution Models: MinBAR Package' for further details on how to use this package, examples, etc.
 #' @import "dismo" "maxnet"
 #' @importFrom grDevices dev.off graphics.off pdf
@@ -17,9 +17,9 @@
 #' @param occ Data frame or character. Data set with presences (occurrences). A data frame with 3 columns: long, lat and species name (in this order)
 #' @param varbles Raster* object. A raster brick of the independent variables, or a directory where the rasters are. It will use all the rasters in the folder. Supported: .tif and .bil
 #' @param wd Character. A directory to save the results
-#' @param prj Numeric. Coordinates system (e.g. "4326" is WGS84; check \url{http://spatialreference.org/} )
+#' @param prj Numeric. Coordinates system (e.g. "4326" is WGS84; check \url{https://spatialreference.org/} )
 #' @param num_bands Numeric. Number of buffers (default is 10)
-#' @param n_rep Numeric. Number of replicates (default is 3)
+#' @param n_rep Numeric. Number of replicates (default is 15)
 #' @param occ_prop_test Numeric. Proportion of presences (occurrences) set aside for testing (default is 0.3)
 #' @param maxent_tool Character. Either "dismo" or (default) "maxnet"
 #' @param BI_part Numeric. Maximum Boyce Index Partial to stop the process if reached
@@ -28,7 +28,7 @@
 #' @param SD_BI_tot Numeric. Minimum SD of the Boyce Index Total to stop the process if reached (last 3 buffers)
 #' @return \code{selfinfo_mod_}, \code{info_mod_} and \code{info_mod_means_} (all followed by the name of the species). The first two tables are merely informative about how the modelling process has been developed and the results of each model. Whereas \code{info_mod_means_} shows the means of the n models run for each buffer
 #' @name minba()
-#' @references Rotllan-Puig, X. & Traveset, A. 2019. Determining the Minimal Background Area for Species Distribution Models: MinBAR Package. bioRxiv. 571182. DOI: 10.1101/571182
+#' @references Rotllan-Puig, X. & Traveset, A. 2021. Determining the Minimal Background Area for Species Distribution Models: MinBAR Package. Ecological Modelling. 439:109353. https://doi.org/10.1016/j.ecolmodel.2020.109353
 #' @export
 #' @examples
 #' \dontrun{
@@ -37,13 +37,13 @@
 #'       maxent_tool = "maxnet")
 #' }
 #'
-# Created on: Summer 2018 - Winter 2019
+# Created on: Summer 2018 - Winter 2019 (Updated: Summer 2020)
 #
 
 minba <- function(occ = NULL, varbles = NULL,
                   wd = NULL,
                   prj = NULL,
-                  num_bands = 10, n_rep = 3,
+                  num_bands = 10, n_rep = 15,
                   occ_prop_test = 0.3,
                   maxent_tool = "maxnet",
                   BI_part = NULL, BI_tot = NULL,
@@ -86,7 +86,8 @@ minba <- function(occ = NULL, varbles = NULL,
     vrbles <- varbles
   }
   if (!is.null(prj)) vrbles@crs <- sp::CRS(paste0("+init=EPSG:", prj))
-
+  if (is.na(vrbles@crs)) stop("Please provide variables with a coordinates system or a
+                              coordinate system reference through 'prj'")
 
   #### Modelling per each species ####
   specs <- unique(presences$sp2)
@@ -99,11 +100,14 @@ minba <- function(occ = NULL, varbles = NULL,
     pres <- pres[, c(2, 1, 4)]
     sp::coordinates(pres) <- c("lon", "lat")  # setting spatial coordinates
     if (!is.null(prj)) pres@proj4string <- sp::CRS(paste0("+init=EPSG:", prj))
+    if (is.na(pres@proj4string)) stop("Make sure the coordinates system of occurrences and variabes are the same")
+
 
     #### Calculating the centre of the population, its most distant point and "bands" ####
-    #pop_cent <- c(mean(presences$x, na.rm =TRUE), mean(presences$y, na.rm =TRUE))
-    #pop_cent <- as.data.frame(matrix(pop_cent, ncol = 2))
-    #names(pop_cent) <- c("x", "y")
+    if(!grepl("WGS84", vrbles@crs@projargs)){
+      vrbles <- raster::projectRaster(vrbles, crs = sp::CRS(paste0("+init=EPSG:", 4326)))
+      pres <- sp::spTransform(pres, CRSobj = sp::CRS(paste0("+init=EPSG:", 4326)))
+    }
 
     geocntr <- as.data.frame(geosphere::geomean(pres))  #mean location for spherical (longitude/latitude) coordinates that deals with the angularity
 
@@ -303,9 +307,13 @@ minba <- function(occ = NULL, varbles = NULL,
                                                   type = c("logistic"))
         }
 
-        #make evaluations
+        #Make evaluations
         evs1 <- dismo::evaluate(modl, p = pres4test_tot, a = bckgr_pts1, x = varbles1)
         save(evs1, file = paste0(path, "/evaluations_tot.RData"))
+
+        #MESS map
+        reference_points <- raster::extract(varbles2, pres4model)
+        mss <- dismo::mess(x = varbles1, v = reference_points, full = FALSE, filename = paste0(path, "/MESS_map.tif"))
 
         #Computing Boyce Index
         if(maxent_tool == "dismo"){
@@ -409,9 +417,9 @@ minba <- function(occ = NULL, varbles = NULL,
                            main = bquote(Boyce~Index~(mean~of~.(n_rep)~models)~-~italic(.(specs_long))),
                            ylab = "Boyce Index", xlab = "Buffer (km)",
                            key=list(#space = "right",
-                           x=0.5,y=0.2,
-                           lines = list(col=c("blue", "green", "magenta")),
-                           text = list(c("Boyce Index Partial","Boyce Index Total", "Execution Time"))))
+                             x=0.5,y=0.2,
+                             lines = list(col=c("blue", "green", "magenta")),
+                             text = list(c("Boyce Index Partial","Boyce Index Total", "Execution Time"))))
     plt1 <- lattice::xyplot(ExecutionTime ~ Buffer, dt2exp_mean,
                             type = c("p", "l"),
                             ylab = "Execution Time (min)",
